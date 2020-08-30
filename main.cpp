@@ -97,9 +97,11 @@ struct action {
 };
 
 const int MAP_SIZE = 64;
+const int THINK_PERIOD = 16;
 
 struct map {
     tile tiles[MAP_SIZE][MAP_SIZE];
+    unsigned long clock;
 
     void render(unsigned char raster[], int offsetX, int offsetY, int width, int height, int scale) {
         for (int y = 0; y < height; ++y) {
@@ -116,45 +118,65 @@ struct map {
 
     std::vector<action> actions{};
 
+    void think(int2 position, tile *tile) {
+        switch (kind_at(position)) {
+            case PREY:
+                break;
+        }
+    }
+
+    void adjust(int2 position, tile *tile) {
+        if (tile->target.x != 0 || tile->target.y != 0) {
+            char2 dir = tile->target.sign();
+            if (abs(tile->target.x) * (kind_at(position + dir.x2()) == EMPTY) >
+                abs(tile->target.y) * (kind_at(position + dir.y2()) == EMPTY)) {
+                actions.push_back(action{
+                        .kind = MOVE,
+                        .from = position,
+                        .to = position + dir.x2()
+                });
+            } else {
+                actions.push_back(action{
+                        .kind = MOVE,
+                        .from = position,
+                        .to = position + dir.y2()
+                });
+            }
+        }
+    }
+
+    void do_action(action action) {
+        switch (action.kind) {
+            case MOVE:
+                if (kind_at(action.to) == EMPTY) {
+                    move(action.from, action.to);
+                    tile *tile = at(action.to);
+                    tile->target = char2{
+                            .x = static_cast<char>(tile->target.x - (action.to.x - action.from.x)),
+                            .y = static_cast<char>(tile->target.y - (action.to.y - action.from.y)),
+                    };
+                }
+                break;
+        }
+    }
+
     void step() {
         actions.clear();
         for (int y = 0; y < MAP_SIZE; ++y) {
             for (int x = 0; x < MAP_SIZE; ++x) {
                 int2 position{.x = x, .y = y};
-                switch (kind_at(position)) {
-                    case PREY:
-                        tile *current = at(position);
-                        if (current->target.x != 0 || current->target.y != 0) {
-                            char2 dir = current->target.sign();
-                            if (abs(current->target.x) > abs(current->target.y) &&
-                                kind_at(position + dir.x2()) == EMPTY) {
-                                actions.push_back(action{
-                                        .kind = MOVE,
-                                        .from = position,
-                                        .to = position + dir.x2()
-                                });
-                            } else if (kind_at(position + dir.y2()) == EMPTY) {
-                                actions.push_back(action{
-                                        .kind = MOVE,
-                                        .from = position,
-                                        .to = position + dir.y2()
-                                });
-                            }
-                        }
-                        break;
-//                    case PREDATOR:
-//                        break;
+                tile *tile = at(position);
+                if ((clock + tile->thinkOffset) % THINK_PERIOD == 0) {
+                    think(position, tile);
+                } else {
+                    adjust(position, tile);
                 }
             }
         }
         for (auto action : actions) {
-            switch (action.kind) {
-                case MOVE:
-                    if (kind_at(action.to) == EMPTY)
-                        move(action.from, action.to);
-                    break;
-            }
+            do_action(action);
         }
+        clock++;
     }
 
     tile_kind kind_at(int2 position) {
