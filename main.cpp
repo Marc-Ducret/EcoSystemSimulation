@@ -1,5 +1,4 @@
 #include <iostream>
-#include <unistd.h>
 #include <cmath>
 #include <SFML/Graphics.hpp>
 
@@ -64,6 +63,13 @@ struct char2 {
 struct int2 {
     int x, y;
 
+    int2 sign() const {
+        return int2{
+                .x = ::sign(x),
+                .y = ::sign(y)
+        };
+    }
+
     int2 operator+(int2 that) const {
         return int2{
                 .x = x + that.x,
@@ -82,9 +88,8 @@ struct int2 {
 struct tile {
     tile_kind kind;
     unsigned short age;
-    unsigned char thinkOffset;
+    unsigned char think_offset;
     char2 target;
-    float variance;
 };
 
 typedef unsigned char action_kind;
@@ -97,7 +102,7 @@ struct action {
 };
 
 const int MAP_SIZE = 64;
-const int THINK_PERIOD = 16;
+const int THINK_PERIOD = 8;
 
 struct map {
     tile tiles[MAP_SIZE][MAP_SIZE];
@@ -118,30 +123,72 @@ struct map {
 
     std::vector<action> actions{};
 
+    bool find_closest(tile_kind kind, int2 position, int distance, int2 *result) {
+        int dist = 1;
+        int turns = 0;
+        int2 dir{.x = 1, .y = 1};
+        int2 offset{.x = -1, .y = 0};
+        while (dist < distance) {
+            if (kind_at(position + offset) == kind) {
+                *result = position + offset;
+                return true;
+            }
+            offset = offset + dir;
+            if (offset.x == 0) {
+                dir.y = -dir.y;
+                turns++;
+            }
+            if (offset.y == 0) {
+                dir.x = -dir.x;
+                turns++;
+            }
+            if (turns == 3) {
+                turns = 0;
+                offset = offset + offset.sign();
+                dist++;
+            }
+        }
+        return false;
+    }
+
     void think(int2 position, tile *tile) {
         switch (kind_at(position)) {
             case PREY:
+                break;
+            case PREDATOR:
+                find_target(position, PREY, 16);
                 break;
         }
     }
 
     void adjust(int2 position, tile *tile) {
-        if (tile->target.x != 0 || tile->target.y != 0) {
-            char2 dir = tile->target.sign();
-            if (abs(tile->target.x) * (kind_at(position + dir.x2()) == EMPTY) >
-                abs(tile->target.y) * (kind_at(position + dir.y2()) == EMPTY)) {
-                actions.push_back(action{
-                        .kind = MOVE,
-                        .from = position,
-                        .to = position + dir.x2()
-                });
-            } else {
-                actions.push_back(action{
-                        .kind = MOVE,
-                        .from = position,
-                        .to = position + dir.y2()
-                });
-            }
+        switch (tile->kind) {
+            case PREDATOR:
+                find_target(position + tile->target, PREY, 1);
+                break;
+        }
+
+        switch (tile->kind) {
+            case PREY:
+            case PREDATOR:
+                if (tile->target.x != 0 || tile->target.y != 0) {
+                    char2 dir = tile->target.sign();
+                    if ((abs(tile->target.x) * (kind_at(position + dir.x2()) == EMPTY)) >
+                        (abs(tile->target.y) * (kind_at(position + dir.y2()) == EMPTY))) {
+                        actions.push_back(action{
+                                .kind = MOVE,
+                                .from = position,
+                                .to = position + dir.x2()
+                        });
+                    } else {
+                        actions.push_back(action{
+                                .kind = MOVE,
+                                .from = position,
+                                .to = position + dir.y2()
+                        });
+                    }
+                }
+                break;
         }
     }
 
@@ -166,11 +213,11 @@ struct map {
             for (int x = 0; x < MAP_SIZE; ++x) {
                 int2 position{.x = x, .y = y};
                 tile *tile = at(position);
-                if ((clock + tile->thinkOffset) % THINK_PERIOD == 0) {
+                tile->age++;
+                if ((clock + tile->think_offset) % THINK_PERIOD == 0) {
                     think(position, tile);
-                } else {
-                    adjust(position, tile);
                 }
+                adjust(position, tile);
             }
         }
         for (auto action : actions) {
@@ -192,10 +239,24 @@ struct map {
     }
 
     void move(int2 from, int2 to) {
-        tile *tileFrom = at(from);
-        tile *tileTo = at(to);
-        *tileTo = *tileFrom;
-        tileFrom->kind = EMPTY;
+        tile *tile_from = at(from);
+        tile *tile_to = at(to);
+        *tile_to = *tile_from;
+        tile_from->kind = EMPTY;
+    }
+
+    void set_target(int2 position, int2 target) {
+        at(position)->target = char2{
+                .x = static_cast<char>(target.x - position.x),
+                .y = static_cast<char>(target.y - position.y),
+        };
+    }
+
+    void find_target(int2 position, tile_kind kind, int sight) {
+        int2 target{};
+        if (find_closest(kind, position, sight, &target)) {
+            set_target(position, target);
+        }
     }
 };
 
@@ -205,10 +266,10 @@ int main() {
     map map{};
     sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "Eco System");
     map.tiles[1][1].kind = PLANT;
-    map.tiles[1][2].kind = PREY;
-    map.tiles[1][2].target = char2{.x = 10};
+    map.tiles[1][3].kind = PREY;
+    map.tiles[1][3].target = char2{.x = 60, .y = 60};
     map.tiles[2][1].kind = PREDATOR;
-    window.setFramerateLimit(60);
+    window.setFramerateLimit(10);
     window.setVerticalSyncEnabled(true);
     sf::Texture texture;
     texture.create(WINDOW_WIDTH, WINDOW_HEIGHT);
