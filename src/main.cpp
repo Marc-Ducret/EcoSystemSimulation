@@ -2,116 +2,21 @@
 #include <cmath>
 #include <SFML/Graphics.hpp>
 
-template<typename T>
-T sign(T val) {
-    return (T(0) < val) - (val < T(0));
-}
-
-typedef unsigned char tile_kind;
-
-const tile_kind EMPTY = 0;
-const tile_kind WATER = 1;
-const tile_kind PLANT = 2;
-const tile_kind PREY = 3;
-const tile_kind PREDATOR = 4;
-const tile_kind VOID = 0xFF;
-
-unsigned int render_tile_kind(tile_kind kind) {
-    switch (kind) {
-        case EMPTY:
-            return 0x204020;
-        case WATER:
-            return 0x2020A0;
-        case PLANT:
-            return 0x20A020;
-        case PREY:
-            return 0xA04080;
-        case PREDATOR:
-            return 0xA02020;
-        case VOID:
-            return 0x808080;
-        default:
-            return 0xFF00FF;
-    }
-}
-
-struct char2 {
-    char x, y;
-
-    char2 sign() const {
-        return char2{
-                .x = ::sign(x),
-                .y = ::sign(y)
-        };
-    }
-
-    char2 x2() const {
-        return char2{
-                .x = x,
-                .y = 0
-        };
-    }
-
-    char2 y2() const {
-        return char2{
-                .x = 0,
-                .y = y
-        };
-    }
-};
-
-struct int2 {
-    int x, y;
-
-    int2 sign() const {
-        return int2{
-                .x = ::sign(x),
-                .y = ::sign(y)
-        };
-    }
-
-    int2 operator+(int2 that) const {
-        return int2{
-                .x = x + that.x,
-                .y = y + that.y
-        };
-    }
-
-    int2 operator+(char2 that) const {
-        return int2{
-                .x = x + that.x,
-                .y = y + that.y
-        };
-    }
-};
-
-struct tile {
-    tile_kind kind;
-    unsigned short age;
-    unsigned char think_offset;
-    char2 target;
-};
-
-typedef unsigned char action_kind;
-
-const action_kind MOVE = 0;
-
-struct action {
-    action_kind kind;
-    int2 from, to;
-};
+#include "math_utils.h"
+#include "tile.h"
+#include "action.h"
 
 const int MAP_SIZE = 64;
 const int THINK_PERIOD = 8;
 
 struct map {
-    tile tiles[MAP_SIZE][MAP_SIZE];
+    tile::tile tiles[MAP_SIZE][MAP_SIZE];
     unsigned long clock;
 
     void render(unsigned char raster[], int offsetX, int offsetY, int width, int height, int scale) {
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
-                unsigned int color = render_tile_kind(
+                unsigned int color = tile::Color(
                         kind_at(int2{.x=(x - offsetX) / scale, .y=(y - offsetY) / scale}));
                 raster[(x + width * y) * 4 + 0] = color >> 16;
                 raster[(x + width * y) * 4 + 1] = color >> 8;
@@ -121,9 +26,9 @@ struct map {
         }
     }
 
-    std::vector<action> actions{};
+    std::vector<action::action> actions{};
 
-    bool find_closest(tile_kind kind, int2 position, int distance, int2 *result) {
+    bool find_closest(tile::Kind kind, int2 position, int distance, int2 *result) {
         int dist = 1;
         int turns = 0;
         int2 dir{.x = 1, .y = 1};
@@ -151,38 +56,38 @@ struct map {
         return false;
     }
 
-    void think(int2 position, tile *tile) {
+    void think(int2 position, tile::tile *tile) {
         switch (kind_at(position)) {
-            case PREY:
+            case tile::PREY:
                 break;
-            case PREDATOR:
-                find_target(position, PREY, 16);
+            case tile::PREDATOR:
+                find_target(position, tile::PREY, 16);
                 break;
         }
     }
 
-    void adjust(int2 position, tile *tile) {
-        switch (tile->kind) {
-            case PREDATOR:
-                find_target(position + tile->target, PREY, 1);
+    void adjust(int2 position, tile::tile *tile) {
+        switch (tile->type) {
+            case tile::PREDATOR:
+                find_target(position + tile->target, tile::PREY, 1);
                 break;
         }
 
-        switch (tile->kind) {
-            case PREY:
-            case PREDATOR:
+        switch (tile->type) {
+            case tile::PREY:
+            case tile::PREDATOR:
                 if (tile->target.x != 0 || tile->target.y != 0) {
                     char2 dir = tile->target.sign();
-                    if ((abs(tile->target.x) * (kind_at(position + dir.x2()) == EMPTY)) >
-                        (abs(tile->target.y) * (kind_at(position + dir.y2()) == EMPTY))) {
-                        actions.push_back(action{
-                                .kind = MOVE,
+                    if ((abs(tile->target.x) * (kind_at(position + dir.x2()) == tile::EMPTY)) >
+                        (abs(tile->target.y) * (kind_at(position + dir.y2()) == tile::EMPTY))) {
+                        actions.push_back(action::action{
+                                .kind = action::MOVE,
                                 .from = position,
                                 .to = position + dir.x2()
                         });
                     } else {
-                        actions.push_back(action{
-                                .kind = MOVE,
+                        actions.push_back(action::action{
+                                .kind = action::MOVE,
                                 .from = position,
                                 .to = position + dir.y2()
                         });
@@ -192,12 +97,12 @@ struct map {
         }
     }
 
-    void do_action(action action) {
+    void do_action(action::action action) {
         switch (action.kind) {
-            case MOVE:
-                if (kind_at(action.to) == EMPTY) {
+            case action::MOVE:
+                if (kind_at(action.to) == tile::EMPTY) {
                     move(action.from, action.to);
-                    tile *tile = at(action.to);
+                    tile::tile *tile = at(action.to);
                     tile->target = char2{
                             .x = static_cast<char>(tile->target.x - (action.to.x - action.from.x)),
                             .y = static_cast<char>(tile->target.y - (action.to.y - action.from.y)),
@@ -212,7 +117,7 @@ struct map {
         for (int y = 0; y < MAP_SIZE; ++y) {
             for (int x = 0; x < MAP_SIZE; ++x) {
                 int2 position{.x = x, .y = y};
-                tile *tile = at(position);
+                tile::tile *tile = at(position);
                 tile->age++;
                 if ((clock + tile->think_offset) % THINK_PERIOD == 0) {
                     think(position, tile);
@@ -226,23 +131,23 @@ struct map {
         clock++;
     }
 
-    tile_kind kind_at(int2 position) {
+    tile::Kind kind_at(int2 position) {
         if (position.x < 0 || position.x >= MAP_SIZE || position.y < 0 || position.y >= MAP_SIZE)
-            return VOID;
-        return tiles[position.x][position.y].kind;
+            return tile::VOID;
+        return tiles[position.x][position.y].type;
     }
 
-    tile *at(int2 position) {
+    tile::tile *at(int2 position) {
         if (position.x < 0 || position.x >= MAP_SIZE || position.y < 0 || position.y >= MAP_SIZE)
             return nullptr;
         return &tiles[position.x][position.y];
     }
 
     void move(int2 from, int2 to) {
-        tile *tile_from = at(from);
-        tile *tile_to = at(to);
+        auto *tile_from = at(from);
+        auto *tile_to = at(to);
         *tile_to = *tile_from;
-        tile_from->kind = EMPTY;
+        tile_from->type = tile::EMPTY;
     }
 
     void set_target(int2 position, int2 target) {
@@ -252,7 +157,7 @@ struct map {
         };
     }
 
-    void find_target(int2 position, tile_kind kind, int sight) {
+    void find_target(int2 position, tile::Kind kind, int sight) {
         int2 target{};
         if (find_closest(kind, position, sight, &target)) {
             set_target(position, target);
@@ -265,10 +170,10 @@ const unsigned int WINDOW_WIDTH = 512, WINDOW_HEIGHT = 512;
 int main() {
     map map{};
     sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "Eco System");
-    map.tiles[1][1].kind = PLANT;
-    map.tiles[1][3].kind = PREY;
+    map.tiles[1][1].type = tile::PLANT;
+    map.tiles[1][3].type = tile::PREY;
     map.tiles[1][3].target = char2{.x = 60, .y = 60};
-    map.tiles[2][1].kind = PREDATOR;
+    map.tiles[2][1].type = tile::PREDATOR;
     window.setFramerateLimit(10);
     window.setVerticalSyncEnabled(true);
     sf::Texture texture;
